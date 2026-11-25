@@ -3,10 +3,12 @@ import aiplaySource from "./scripts/aiplay.luau";
 import {
   checkLicense,
   findLicenseByKeyId,
+  hwidIdFor,
   isProductActive,
   issueToken,
   licenseUsable,
   normalizeUserId,
+  tokenHwidMatches,
   verifyToken,
 } from "./src/license.js";
 
@@ -108,9 +110,10 @@ async function handleVerify(request, url, env) {
   const product = getParam(params, "product") || "aiplay";
   const key = getParam(params, "key", "license", "licensekey");
   const userId = getParam(params, "userid", "user", "user_id");
+  const hwid = getParam(params, "hwid", "hardwareid", "machineid", "clientid");
   const nonce = getParam(params, "nonce");
 
-  const result = await checkLicense({ whitelist, product, key, userId });
+  const result = await checkLicense({ whitelist, product, key, userId, hwid });
   if (!result.ok) {
     return json({ ok: false, licensed: false, reason: result.reason, serverTime: nowSeconds() }, 401);
   }
@@ -124,6 +127,7 @@ async function handleVerify(request, url, env) {
     product,
     userId: result.userId,
     keyId: result.keyId,
+    hwidId: result.hwidId,
     nonce,
     ttlSeconds: ttl,
     now: nowSeconds(),
@@ -134,6 +138,7 @@ async function handleVerify(request, url, env) {
     licensed: true,
     product,
     userId: result.userId,
+    hwidBound: Boolean(result.hwidId),
     token: issued.token,
     tokenExpiresAt: issued.payload.exp,
     serverTime: nowSeconds(),
@@ -150,6 +155,7 @@ async function handleScript(request, url, env) {
   const product = getParam(params, "product") || "aiplay";
   const userId = normalizeUserId(getParam(params, "userid"));
   const name = getParam(params, "name", "script") || "aiplay";
+  const hwid = getParam(params, "hwid", "hardwareid", "machineid", "clientid");
   const secret = env && env.TOKEN_SECRET;
 
   if (!secret) return json({ ok: false, reason: "server_misconfigured" }, 500);
@@ -169,6 +175,16 @@ async function handleScript(request, url, env) {
   const license = findLicenseByKeyId(whitelist, payload.k, payload.u, payload.p);
   if (!licenseUsable(license, nowSeconds())) {
     return json({ ok: false, reason: "license_revoked" }, 403);
+  }
+
+  const tokenHwid = payload.h || null;
+  if (tokenHwid) {
+    if (!tokenHwidMatches(tokenHwid, license)) {
+      return json({ ok: false, reason: "license_revoked" }, 403);
+    }
+    if ((await hwidIdFor(hwid)) !== tokenHwid) {
+      return json({ ok: false, reason: "hwid_mismatch" }, 401);
+    }
   }
 
   if (!Object.prototype.hasOwnProperty.call(SOURCES, name)) {

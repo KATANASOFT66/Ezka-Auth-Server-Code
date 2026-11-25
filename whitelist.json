@@ -21,10 +21,11 @@
     {
       "keyHash": "0000000000000000000000000000000000000000000000000000000000000000",
       "userId": "000000000",
+      "hwidHash": null,
       "product": "aiplay",
       "expiresAt": null,
       "active": false,
-      "note": "Replace this entry with a real key hash and UserId before deploying"
+      "note": "Replace with a real key hash and UserId. Set hwidHash to bind the license to one device."
     }
   ]
 }
