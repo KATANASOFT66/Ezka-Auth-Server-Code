@@ -7,7 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "node --test",
-    "key": "node tools/hash-key.mjs"
+    "key": "node tools/hash-key.mjs",
+    "hwid": "node tools/hash-hwid.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

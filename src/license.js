@@ -1,6 +1,8 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const KEY_PATTERN = /^[A-Z0-9-]{8,96}$/;
+const HWID_PATTERN = /^[A-Z0-9_-]{8,128}$/;
+const HWID_ID_PATTERN = /^[0-9a-f]{12}$/;
 
 function nowSeconds() {
   return Math.floor(Date.now() / 1000);
@@ -49,6 +51,12 @@ export function normalizeKey(value) {
   return KEY_PATTERN.test(key) ? key : null;
 }
 
+export function normalizeHwid(value) {
+  if (typeof value !== "string") return null;
+  const hwid = value.trim().toUpperCase();
+  return HWID_PATTERN.test(hwid) ? hwid : null;
+}
+
 export async function sha256Hex(value) {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -68,7 +76,7 @@ export function isProductActive(whitelist, product, now = nowSeconds()) {
   return !expires(entry.expiresAt, now);
 }
 
-export async function checkLicense({ whitelist, product, key, userId, now = nowSeconds() }) {
+export async function checkLicense({ whitelist, product, key, userId, hwid, now = nowSeconds() }) {
   if (typeof product !== "string" || !isProductActive(whitelist, product, now)) {
     return { ok: false, reason: "product_unavailable" };
   }
@@ -77,15 +85,34 @@ export async function checkLicense({ whitelist, product, key, userId, now = nowS
   const normalizedUserId = normalizeUserId(userId);
   if (!normalizedKey || !normalizedUserId) return { ok: false, reason: "invalid_credentials" };
 
+  const normalizedHwid = normalizeHwid(hwid);
   const keyHash = await sha256Hex(normalizedKey);
   const licenses = whitelist && Array.isArray(whitelist.licenses) ? whitelist.licenses : [];
 
   for (const entry of licenses) {
     if (!safeEqual(entry.keyHash, keyHash)) continue;
     if (entry.userId !== normalizedUserId || entry.product !== product) continue;
+
+    const storedHwidHash = typeof entry.hwidHash === "string" && entry.hwidHash.length > 0
+      ? entry.hwidHash.toLowerCase()
+      : null;
+
+    if (storedHwidHash) {
+      if (!normalizedHwid) return { ok: false, reason: "hwid_required" };
+      const submittedHwidHash = await sha256Hex(normalizedHwid);
+      if (!safeEqual(storedHwidHash, submittedHwidHash)) return { ok: false, reason: "hwid_mismatch" };
+    }
+
     if (entry.active === false) return { ok: false, reason: "license_inactive" };
     if (expires(entry.expiresAt, now)) return { ok: false, reason: "license_expired" };
-    return { ok: true, userId: normalizedUserId, keyId: keyHash.slice(0, 12), keyHash };
+
+    return {
+      ok: true,
+      userId: normalizedUserId,
+      keyId: keyHash.slice(0, 12),
+      keyHash,
+      hwidId: storedHwidHash ? storedHwidHash.slice(0, 12) : null,
+    };
   }
 
   return { ok: false, reason: "invalid_credentials" };
@@ -104,6 +131,16 @@ export function findLicenseByKeyId(whitelist, keyId, userId, product) {
 
 export function licenseUsable(license, now = nowSeconds()) {
   return Boolean(license) && license.active !== false && !expires(license.expiresAt, now);
+}
+
+export async function hwidIdFor(value) {
+  const normalized = normalizeHwid(value);
+  return normalized ? (await sha256Hex(normalized)).slice(0, 12) : null;
+}
+
+export function tokenHwidMatches(hwidId, license) {
+  if (!HWID_ID_PATTERN.test(hwidId) || !license || typeof license.hwidHash !== "string") return false;
+  return license.hwidHash.toLowerCase().startsWith(hwidId);
 }
 
 async function signHmac(payload, secret) {
@@ -129,6 +166,7 @@ export async function issueToken({
   product,
   userId,
   keyId,
+  hwidId = null,
   nonce,
   ttlSeconds = 300,
   now = nowSeconds(),
@@ -138,6 +176,7 @@ export async function issueToken({
     p: product,
     u: userId,
     k: keyId,
+    h: hwidId && HWID_ID_PATTERN.test(hwidId) ? hwidId : null,
     iat: now,
     exp: now + ttlSeconds,
     jti: typeof nonce === "string" && nonce.length > 0 ? nonce.slice(0, 128) : randomId(),
@@ -165,6 +204,9 @@ export async function verifyToken({ token, secret, now = nowSeconds() }) {
 
   if (!payload || typeof payload !== "object") return { ok: false, reason: "invalid_token" };
   if (payload.v !== 1 || typeof payload.p !== "string" || typeof payload.u !== "string") {
+    return { ok: false, reason: "invalid_token" };
+  }
+  if (payload.h !== null && payload.h !== undefined && !HWID_ID_PATTERN.test(payload.h)) {
     return { ok: false, reason: "invalid_token" };
   }
   if (typeof payload.iat !== "number" || payload.iat > now + 30) return { ok: false, reason: "invalid_token" };

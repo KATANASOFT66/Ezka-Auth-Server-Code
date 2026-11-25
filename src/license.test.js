@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 import {
   checkLicense,
   findLicenseByKeyId,
+  hwidIdFor,
   isProductActive,
   issueToken,
   licenseUsable,
+  normalizeHwid,
   normalizeKey,
   normalizeUserId,
   safeEqual,
   sha256Hex,
+  tokenHwidMatches,
   verifyToken,
 } from "./license.js";
 
@@ -17,6 +20,8 @@ const SECRET = "test-signing-secret";
 const NOW = Math.floor(Date.UTC(2026, 0, 1) / 1000);
 const KEY = "GAIPLAY-TEST-0001";
 const OTHER_KEY = "GAIPLAY-TEST-0002";
+const DEVICE = "ABC-123-DEVICE-01";
+const OTHER_DEVICE = "OTHER-DEVICE-0002";
 
 const whitelist = {
   products: {
@@ -47,6 +52,14 @@ whitelist.licenses.push({
   product: "mythorith",
   expiresAt: null,
   active: false,
+});
+whitelist.licenses.push({
+  keyHash: await sha256Hex("GAIPLAY-TEST-0004"),
+  userId: "222222222",
+  hwidHash: await sha256Hex(DEVICE),
+  product: "aiplay",
+  expiresAt: null,
+  active: true,
 });
 
 test("normalizeKey uppercases and rejects malformed keys", () => {
@@ -133,4 +146,52 @@ test("revocation is enforced through the token key id", async () => {
   assert.equal(licenseUsable(license, NOW), true);
   assert.equal(findLicenseByKeyId(whitelist, "ffffffffffff", "123456789", "aiplay"), null);
   assert.equal(licenseUsable({ ...license, active: false }, NOW), false);
+});
+
+test("normalizeHwid uppercases and rejects malformed ids", () => {
+  assert.equal(normalizeHwid(" abc-123-device-01 "), DEVICE);
+  assert.equal(normalizeHwid("short"), null);
+  assert.equal(normalizeHwid(12345), null);
+});
+
+test("device-bound license requires a matching hwid", async () => {
+  const base = { whitelist, product: "aiplay", key: "GAIPLAY-TEST-0004", userId: "222222222", now: NOW };
+  const result = await checkLicense({ ...base, hwid: DEVICE.toLowerCase() });
+  assert.equal(result.ok, true);
+  assert.equal(result.hwidId, (await sha256Hex(DEVICE)).slice(0, 12));
+  assert.equal((await checkLicense({ ...base, hwid: null })).reason, "hwid_required");
+  assert.equal((await checkLicense({ ...base, hwid: OTHER_DEVICE })).reason, "hwid_mismatch");
+});
+
+test("hwid is ignored for licenses that are not device-bound", async () => {
+  const result = await checkLicense({
+    whitelist,
+    product: "aiplay",
+    key: KEY,
+    userId: "123456789",
+    hwid: OTHER_DEVICE,
+    now: NOW,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.hwidId, null);
+});
+
+test("token binds the hwid id and rejects a different device", async () => {
+  const keyId = (await sha256Hex(KEY)).slice(0, 12);
+  const hwidId = await hwidIdFor(DEVICE);
+  const issued = await issueToken({
+    secret: SECRET,
+    product: "aiplay",
+    userId: "123456789",
+    keyId,
+    hwidId,
+    ttlSeconds: 300,
+    now: NOW,
+  });
+  const verified = await verifyToken({ token: issued.token, secret: SECRET, now: NOW });
+  assert.equal(verified.payload.h, hwidId);
+  assert.equal((await hwidIdFor(OTHER_DEVICE)) === verified.payload.h, false);
+  assert.equal(tokenHwidMatches(hwidId, { hwidHash: await sha256Hex(DEVICE) }), true);
+  assert.equal(tokenHwidMatches(hwidId, { hwidHash: await sha256Hex(OTHER_DEVICE) }), false);
+  assert.equal(tokenHwidMatches(null, { hwidHash: await sha256Hex(DEVICE) }), false);
 });

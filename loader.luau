@@ -3,6 +3,7 @@ local CONFIG = {
 	PRODUCT = "aiplay",
 	KEY = "GAIPLAY-XXXX-XXXX-XXXX-XXXX",
 	USER_ID = "000000000",
+	HWID = "",
 	SCRIPT = "aiplay",
 }
 
@@ -83,12 +84,39 @@ local function encodeQuery(values)
 	return table.concat(parts, "&")
 end
 
+local function getHwid()
+	if type(CONFIG.HWID) == "string" and CONFIG.HWID ~= "" then
+		return CONFIG.HWID
+	end
+
+	local ok, clientId = pcall(function()
+		return game:GetService("RbxAnalyticsService"):GetClientId()
+	end)
+	if ok and type(clientId) == "string" and clientId ~= "" then
+		return clientId
+	end
+
+	local executorHwid = env.HWID or (syn and syn.get_hwid) or (getgenv and getgenv().HWID)
+	if type(executorHwid) == "function" then
+		local callOk, value = pcall(executorHwid)
+		if callOk and type(value) == "string" then
+			return value
+		end
+	elseif type(executorHwid) == "string" then
+		return executorHwid
+	end
+
+	return ""
+end
+
 local function verify()
 	local userId = tostring(CONFIG.USER_ID)
+	local hwid = getHwid()
 	local payload = HttpService:JSONEncode({
 		product = CONFIG.PRODUCT,
 		key = CONFIG.KEY,
 		userId = userId,
+		hwid = hwid,
 		nonce = HttpService:GenerateGUID(false),
 	})
 
@@ -102,6 +130,7 @@ local function verify()
 			product = CONFIG.PRODUCT,
 			key = CONFIG.KEY,
 			userId = userId,
+			hwid = hwid,
 		})
 		response, err = httpRequest(CONFIG.BASE_URL .. "/v1/verify?" .. query, "GET", {
 			Accept = "application/json",
@@ -132,6 +161,7 @@ local function loadSource(license)
 		token = license.token,
 		product = CONFIG.PRODUCT,
 		userId = tostring(CONFIG.USER_ID),
+		hwid = getHwid(),
 		name = CONFIG.SCRIPT,
 	})
 
@@ -196,5 +226,6 @@ return {
 	run = run,
 	verify = verify,
 	loadSource = loadSource,
+	getHwid = getHwid,
 	config = CONFIG,
 }
