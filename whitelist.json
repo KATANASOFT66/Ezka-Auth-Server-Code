@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "products": {
+    "aiplay": {
+      "label": "G.AIPLAY",
+      "enabled": true,
+      "expiresAt": null
+    },
+    "myui": {
+      "label": "My UI",
+      "enabled": true,
+      "expiresAt": null
+    },
+    "mythorith": {
+      "label": "Mythorith Hub",
+      "enabled": true,
+      "expiresAt": null
+    }
+  },
+  "licenses": [
+    {
+      "keyHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "userId": "000000000",
+      "product": "aiplay",
+      "expiresAt": null,
+      "active": false,
+      "note": "Replace this entry with a real key hash and UserId before deploying"
+    }
+  ]
+}

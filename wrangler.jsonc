@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "g-aiplay-license",
+  "main": "server.js",
+  "compatibility_date": "2025-01-01",
+  "rules": [
+    { "type": "Text", "globs": ["**/*.luau"], "fallthrough": true }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "TOKEN_TTL_SECONDS": "300"
+  }
+}
